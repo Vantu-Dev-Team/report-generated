@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'report-generated API — FastAPI Lambda behind API Gateway with Cognito auth'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, stage, prod]
+  UbidotsToken:
+    Type: String
+    NoEcho: true
+    Description: Ubidots API token (injected at deploy from SSM SecureString)
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: python3.12
+    MemorySize: 256
+    Environment:
+      Variables:
+        TABLE_NAME: !Sub '{{resolve:ssm:/report-generated/${Environment}/dynamodb/table-name}}'
+        ENVIRONMENT: !Ref Environment
+        UBIDOTS_TOKEN: !Ref UbidotsToken
+
+Resources:
+  ReportGeneratedApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub '${AWS::Region}-report-generated-api-${Environment}'
+      StageName: !Ref Environment
+      EndpointConfiguration:
+        Type: REGIONAL
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/{{resolve:ssm:/report-generated/${Environment}/cognito/user-pool-id}}'
+      Cors:
+        AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Ubidots-Token'"
+        AllowOrigin: "'*'"
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: 5
+
+  ReportGeneratedApiFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::Region}-report-generated-data-${Environment}'
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AWS::Region}-report-generated-data-${Environment}/index/*'
+
+  ReportGeneratedApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${AWS::Region}-report-generated-api-${Environment}'
+      CodeUri: report-generated/api/
+      Handler: lambda_function.handler
+      Role: !GetAtt ReportGeneratedApiFunctionRole.Arn
+      Events:
+        HealthEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportGeneratedApi
+            Path: /health
+            Method: GET
+            Auth: {Authorizer: NONE}
+        DocsEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportGeneratedApi
+            Path: /docs
+            Method: GET
+            Auth: {Authorizer: NONE}
+        OpenApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportGeneratedApi
+            Path: /openapi.json
+            Method: GET
+            Auth: {Authorizer: NONE}
+        OptionsEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportGeneratedApi
+            Path: /{proxy+}
+            Method: OPTIONS
+            Auth: {Authorizer: NONE}
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReportGeneratedApi
+            Path: /{proxy+}
+            Method: ANY
+            Auth: {Authorizer: CognitoAuthorizer}
+      Tags:
+        Environment: !Ref Environment
+        Function: report-generated-api
+    Metadata:
+      BuildMethod: python3.12
+
+  ReportGeneratedApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${AWS::Region}-report-generated-api-${Environment}'
+      RetentionInDays: 14
+
+  ApiUrlParam:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/report-generated/${Environment}/api/url'
+      Type: String
+      Value: !Sub 'https://${ReportGeneratedApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+
+Outputs:
+  ApiUrl:
+    Value: !Sub 'https://${ReportGeneratedApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export: {Name: !Sub '${AWS::StackName}-ApiUrl'}
+  FunctionArn:
+    Value: !GetAtt ReportGeneratedApiFunction.Arn
+    Export: {Name: !Sub '${AWS::StackName}-FunctionArn'}
