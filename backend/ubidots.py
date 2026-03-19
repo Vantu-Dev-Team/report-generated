@@ -1,148 +1,229 @@
-"""HTML report generation service."""
-
+"""
+UbidotsService — Ubidots API proxy + HTML report generator
+"""
+import httpx
 import json
-import logging
 from datetime import datetime
-from typing import Any
-
-logger = logging.getLogger(__name__)
 
 
-class GenerateService:
-    def generate(
+UBIDOTS_BASE = "https://industrial.api.ubidots.com"
+
+
+class UbidotsService:
+
+    # ──────────────────────────────────────────
+    # Ubidots API methods
+    # ──────────────────────────────────────────
+
+    async def get_devices(
+        self, token: str, page: int = 1, page_size: int = 50, search: str = ""
+    ) -> dict:
+        params: dict = {"page_size": page_size, "page": page}
+        if search:
+            params["label__icontains"] = search
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"{UBIDOTS_BASE}/api/v2.0/devices/",
+                headers={"X-Auth-Token": token},
+                params=params,
+            )
+            if r.status_code != 200:
+                raise Exception(f"Ubidots error {r.status_code}: {r.text}")
+            return r.json()
+
+    async def get_variables(
         self,
-        config: dict[str, Any],
-        components: list[dict[str, Any]],
-        all_data: dict[str, list[dict[str, Any]]],
-    ) -> str:
-        """Generate a complete styled HTML report."""
-        logger.info("Generating HTML report", extra={"components": len(components)})
-        return generate_html(config, components, all_data)
+        token: str,
+        device_label: str,
+        page: int = 1,
+        page_size: int = 100,
+        search: str = "",
+    ) -> dict:
+        params: dict = {"page_size": page_size, "page": page}
+        if search:
+            params["label__icontains"] = search
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.get(
+                f"{UBIDOTS_BASE}/api/v2.0/devices/~{device_label}/variables/",
+                headers={"X-Auth-Token": token},
+                params=params,
+            )
+            if r.status_code != 200:
+                raise Exception(f"Ubidots error {r.status_code}: {r.text}")
+            return r.json()
 
+    async def fetch_values_all_pages(
+        self,
+        token: str,
+        device_label: str,
+        var_label: str,
+        start_ms: int,
+        end_ms: int,
+        tz_offset: float = -5,
+    ) -> list:
+        tz_ms = int(tz_offset * 3600000)
+        url = f"{UBIDOTS_BASE}/api/v1.6/devices/{device_label}/{var_label}/values/"
+        params = {"start": start_ms, "end": end_ms, "page_size": 10000}
+        all_points = []
 
-def generate_html(
-    config: dict[str, Any],
-    components: list[dict[str, Any]],
-    all_data: dict[str, list[dict[str, Any]]],
-) -> str:
-    title = config.get("titulo", "Informe Operativo")
-    subtitle = config.get("subtitulo", "")
-    author = config.get("autor", "")
-    fecha_inicio = config.get("fecha_inicio", "")
-    fecha_fin = config.get("fecha_fin", "")
-    dosis_objetivo = float(config.get("dosis_objetivo", 0.6))
-    total_maiz_cfg = float(config.get("total_maiz", 0))
-    date_str = datetime.now().strftime("%d de %B de %Y")
+        async with httpx.AsyncClient(timeout=60) as client:
+            while url:
+                r = await client.get(
+                    url,
+                    headers={"X-Auth-Token": token},
+                    params=params,
+                )
+                if r.status_code != 200:
+                    raise Exception(f"Ubidots error {r.status_code}: {r.text}")
+                data = r.json()
+                for pt in data.get("results", []):
+                    ts_ms = pt.get("timestamp", 0)
+                    adjusted_ms = ts_ms + tz_ms
+                    dt = datetime.utcfromtimestamp(adjusted_ms / 1000)
+                    ts_str = dt.strftime("%Y-%m-%dT%H:%M:%S")
+                    all_points.append({"timestamp": ts_str, "value": pt.get("value", 0)})
+                next_url = data.get("next")
+                url = next_url if next_url else None
+                params = {}  # params already embedded in next URL
 
-    # Build R data object
-    report_data: dict[str, Any] = {}
-    report_components: dict[str, Any] = {
-        "chart_series": [],
-        "bars_series": [],
-        "pie_series": [],
-        "table_periods": {},
-    }
-    report_meta: dict[str, Any] = {
-        "dosis_esperada": dosis_objetivo,
-        "total_maiz": total_maiz_cfg,
-        "total_inhimold_excel": 0,
-        "pump_excel_totals": {},
-    }
-    report_historical: list[Any] = []
+        return all_points
 
-    for comp in components:
-        ctype = comp.get("type")
+    # ──────────────────────────────────────────
+    # HTML report generator
+    # ──────────────────────────────────────────
 
-        if ctype == "kpi_row":
-            for card in comp.get("cards", []):
-                key = card.get("data_key")
-                if key and key in all_data:
-                    report_data[key] = all_data[key]
+    def generate_html(self, config: dict, components: list, all_data: dict) -> str:
+        title = config.get("titulo", "Informe Operativo")
+        subtitle = config.get("subtitulo", "")
+        author = config.get("autor", "")
+        fecha_inicio = config.get("fecha_inicio", "")
+        fecha_fin = config.get("fecha_fin", "")
+        tz_offset = config.get("tz_offset", -5)
+        dosis_objetivo = float(config.get("dosis_objetivo", 0.6))
+        total_maiz_cfg = float(config.get("total_maiz", 0))
+        date_str = datetime.now().strftime("%d de %B de %Y")
 
-        elif ctype == "line_chart":
-            for s in comp.get("series", []):
-                key = s.get("data_key")
-                if key and key in all_data:
-                    report_data[key] = all_data[key]
-                    report_components["chart_series"].append({
-                        "var": key,
-                        "label": s.get("label", key),
-                        "color": s.get("color", "#3b82f6"),
-                        "unit": s.get("unit", ""),
-                        "agg": s.get("agg", "sum"),
+        # ── Build R data object ──
+        report_data: dict = {}
+        report_components: dict = {
+            "chart_series": [],
+            "bars_series": [],
+            "pie_series": [],
+            "table_periods": {},
+            "kpi_rows": [],
+        }
+        report_meta: dict = {
+            "dosis_esperada": dosis_objetivo,
+            "total_maiz": total_maiz_cfg,
+            "total_inhimold_excel": 0,
+            "pump_excel_totals": {},
+        }
+        report_historical: list = []
+
+        for comp in components:
+            ctype = comp.get("type")
+
+            if ctype == "kpi_row":
+                comp_id = comp.get("id", f"kpi{len(report_components['kpi_rows'])}")
+                row_cards = []
+                for i, card in enumerate(comp.get("cards", [])):
+                    key = card.get("data_key")
+                    if key and key in all_data:
+                        report_data[key] = all_data[key]
+                    row_cards.append({
+                        "data_key": key or "",
+                        "label": card.get("label", ""),
+                        "unit": card.get("unit", ""),
+                        "color": card.get("color", "#3b82f6"),
+                        "agg": card.get("agg", "sum"),
+                        "card_id": f"kpi_{comp_id}_{i}",
                     })
+                report_components["kpi_rows"].append({"comp_id": comp_id, "cards": row_cards})
 
-        elif ctype == "bar_chart":
-            for s in comp.get("series", []):
-                key = s.get("data_key")
-                if key and key in all_data:
-                    report_data[key] = all_data[key]
-                    report_components["bars_series"].append({
-                        "var": key,
-                        "label": s.get("label", key),
-                        "color": s.get("color", "#3b82f6"),
-                        "unit": s.get("unit", ""),
-                    })
-
-        elif ctype == "pie_chart":
-            for s in comp.get("series", []):
-                key = s.get("data_key")
-                if key and key in all_data:
-                    report_data[key] = all_data[key]
-                    report_components["pie_series"].append({
-                        "var": key,
-                        "label": s.get("label", key),
-                        "color": s.get("color", "#3b82f6"),
-                        "unit": s.get("unit", ""),
-                    })
-
-        elif ctype == "data_table":
-            for period_name, period_series in comp.get("periods", {}).items():
-                period_list = []
-                for s in period_series:
+            elif ctype == "line_chart":
+                for s in comp.get("series", []):
                     key = s.get("data_key")
                     if key and key in all_data:
                         report_data[key] = all_data[key]
-                        period_list.append({
+                        report_components["chart_series"].append({
                             "var": key,
                             "label": s.get("label", key),
+                            "color": s.get("color", "#3b82f6"),
+                            "unit": s.get("unit", ""),
+                            "agg": s.get("agg", "sum"),
+                        })
+
+            elif ctype == "bar_chart":
+                for s in comp.get("series", []):
+                    key = s.get("data_key")
+                    if key and key in all_data:
+                        report_data[key] = all_data[key]
+                        report_components["bars_series"].append({
+                            "var": key,
+                            "label": s.get("label", key),
+                            "color": s.get("color", "#3b82f6"),
                             "unit": s.get("unit", ""),
                         })
-                if period_list:
-                    report_components["table_periods"][period_name] = period_list
 
-        elif ctype == "historical":
-            report_historical = comp.get("rows", [])
+            elif ctype == "pie_chart":
+                for s in comp.get("series", []):
+                    key = s.get("data_key")
+                    if key and key in all_data:
+                        report_data[key] = all_data[key]
+                        report_components["pie_series"].append({
+                            "var": key,
+                            "label": s.get("label", key),
+                            "color": s.get("color", "#3b82f6"),
+                            "unit": s.get("unit", ""),
+                        })
 
-        elif ctype == "raw_data":
-            # raw_data uses all data already loaded
-            pass
+            elif ctype == "data_table":
+                for period_name, period_series in comp.get("periods", {}).items():
+                    period_list = []
+                    for s in period_series:
+                        key = s.get("data_key")
+                        if key and key in all_data:
+                            report_data[key] = all_data[key]
+                            period_list.append({
+                                "var": key,
+                                "label": s.get("label", key),
+                                "unit": s.get("unit", ""),
+                            })
+                    if period_list:
+                        report_components["table_periods"][period_name] = period_list
 
-    # Compute pump totals for meta
-    for s in report_components.get("bars_series", []):
-        key = s["var"]
-        pts = report_data.get(key, [])
-        total = sum(p.get("value", 0) for p in pts)
-        report_meta["pump_excel_totals"][s["label"]] = round(total, 1)
+            elif ctype == "historical":
+                report_historical = comp.get("rows", [])
 
-    total_inhimold = sum(report_meta["pump_excel_totals"].values())
-    report_meta["total_inhimold_excel"] = round(total_inhimold, 1)
+            elif ctype == "raw_data":
+                # raw_data uses all data already loaded
+                pass
 
-    R_json = json.dumps(
-        {
-            "data": report_data,
-            "components": report_components,
-            "historical": report_historical,
-            "meta": report_meta,
-        },
-        ensure_ascii=False,
-    )
+        # ── Compute pump totals for meta ──
+        for s in report_components.get("bars_series", []):
+            key = s["var"]
+            pts = report_data.get(key, [])
+            total = sum(p.get("value", 0) for p in pts)
+            report_meta["pump_excel_totals"][s["label"]] = round(total, 1)
 
-    # Build section HTML
-    sections_html = _build_sections(components, config)
+        total_inhimold = sum(report_meta["pump_excel_totals"].values())
+        report_meta["total_inhimold_excel"] = round(total_inhimold, 1)
 
-    # Assemble final HTML
-    return f"""<!DOCTYPE html>
+        R_json = json.dumps(
+            {
+                "data": report_data,
+                "components": report_components,
+                "historical": report_historical,
+                "meta": report_meta,
+            },
+            ensure_ascii=False,
+        )
+
+        # ── Build section HTML ──
+        sections_html = self._build_sections(components, config)
+
+        # ── Assemble final HTML ──
+        return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
@@ -168,6 +249,13 @@ def generate_html(
         .kpi:hover {{ transform: translateY(-2px); }}
         .maiz-input {{ background: transparent; border: none; border-bottom: 2px dashed #f59e0b; font-family: 'JetBrains Mono', monospace; font-size: 1.875rem; font-weight: 900; color: #b45309; text-align: center; width: 160px; outline: none; }}
         .maiz-input:focus {{ border-bottom-color: #d97706; }}
+        @media print {{
+            body {{ background-color: white !important; padding: 0 !important; }}
+            .hoja {{ box-shadow: none !important; max-width: 100% !important; }}
+            .sticky {{ position: static !important; }}
+            #pdfBtn, #rawSection {{ display: none !important; }}
+            .accordion {{ max-height: none !important; overflow: visible !important; }}
+        }}
     </style>
 </head>
 <body>
@@ -188,6 +276,8 @@ def generate_html(
         <input type="date" id="dStart" class="ctrl" value="{fecha_inicio}" onchange="renderAll()">
         <span class="text-slate-300">—</span>
         <input type="date" id="dEnd" class="ctrl" value="{fecha_fin}" onchange="renderAll()">
+        <div class="flex-grow"></div>
+        <button id="pdfBtn" onclick="window.print()" style="display:flex;align-items:center;gap:8px;padding:7px 18px;background:#2563eb;color:white;font-size:12px;font-weight:700;border:none;border-radius:8px;cursor:pointer;box-shadow:0 2px 6px rgba(37,99,235,0.3)"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>Descargar PDF</button>
     </div>
 
     <!-- REPORT BODY -->
@@ -355,6 +445,12 @@ function renderChart() {{
     var freq = document.getElementById('freqSel');
     var aggOp = op ? op.value : 'sum';
     var freqMs = MS[freq ? freq.value : '1h'] || 3600000;
+    var units = [];
+    series.forEach(function(s) {{
+        var u = s.unit || '';
+        if (units.indexOf(u) === -1) units.push(u);
+    }});
+    var dualAxis = units.length >= 2;
     var traces = [];
     series.forEach(function(s) {{
         var pts = filt(DATA[s.var] || []);
@@ -369,21 +465,27 @@ function renderChart() {{
             xs.push(new Date(+b));
             ys.push(agg(buckets[b], aggOp));
         }});
+        var axisIdx = units.indexOf(s.unit || '');
         traces.push({{
-            x: xs, y: ys, name: s.label, type: 'scatter', mode: 'lines+markers',
-            line: {{color: s.color, width: 2}},
-            marker: {{size: 4, color: s.color}}
+            x: xs, y: ys, name: s.label, type: 'scatter', mode: 'lines',
+            line: {{color: s.color || undefined, width: 1.5}},
+            yaxis: (dualAxis && axisIdx === 1) ? 'y2' : 'y'
         }});
     }});
-    var el = document.getElementById('plotChart');
-    if (el) Plotly.newPlot(el, traces, {{
-        margin: {{t: 20, b: 40, l: 50, r: 20}},
-        legend: {{orientation: 'h', y: -0.25}},
+    var layout = {{
+        margin: {{t: 30, l: 55, r: 20, b: 30}},
+        legend: {{orientation: 'h', y: 1.08, x: 0, xanchor: 'left'}},
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
-        yaxis: {{gridcolor: '#f1f5f9', zerolinecolor: '#e2e8f0'}},
-        xaxis: {{gridcolor: '#f1f5f9'}}
-    }}, {{responsive: true, displayModeBar: false}});
+        font: {{family: 'Inter, sans-serif', color: '#64748b', size: 11}},
+        xaxis: {{gridcolor: '#f1f5f9', anchor: 'y'}},
+        yaxis: {{title: units[0] || '', gridcolor: '#f1f5f9', zerolinecolor: '#e2e8f0', domain: dualAxis ? [0, 0.46] : [0, 1]}}
+    }};
+    if (dualAxis) {{
+        layout.yaxis2 = {{title: units[1] || '', domain: [0.54, 1], gridcolor: '#f1f5f9', zerolinecolor: '#e2e8f0'}};
+    }}
+    var el = document.getElementById('plotChart');
+    if (el) Plotly.newPlot(el, traces, layout, {{responsive: true, displayModeBar: false}});
 }}
 
 function renderBars() {{
@@ -399,10 +501,11 @@ function renderBars() {{
     var el = document.getElementById('plotBars');
     if (el) Plotly.newPlot(el, traces, {{
         barmode: 'group',
-        margin: {{t: 20, b: 40, l: 50, r: 20}},
-        legend: {{orientation: 'h', y: -0.3}},
+        margin: {{t: 10, l: 50, r: 10, b: 30}},
+        legend: {{orientation: 'h', y: 1.1, x: 0, xanchor: 'left'}},
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: 'rgba(0,0,0,0)',
+        font: {{family: 'Inter, sans-serif', color: '#64748b', size: 11}},
         yaxis: {{gridcolor: '#f1f5f9', zerolinecolor: '#e2e8f0'}},
         xaxis: {{gridcolor: '#f1f5f9'}}
     }}, {{responsive: true, displayModeBar: false}});
@@ -421,13 +524,15 @@ function renderPie() {{
     }});
     var el = document.getElementById('plotPie');
     if (el) Plotly.newPlot(el, [{{
-        labels: labels, values: values, type: 'pie', hole: 0.5,
+        labels: labels, values: values, type: 'pie', hole: 0.6,
         marker: {{colors: colors}},
         textinfo: 'percent', hoverinfo: 'label+value'
     }}], {{
-        margin: {{t: 20, b: 20, l: 20, r: 20}},
+        margin: {{t: 10, l: 10, r: 10, b: 10}},
         paper_bgcolor: 'rgba(0,0,0,0)',
-        showlegend: false
+        font: {{family: 'Inter, sans-serif', color: '#64748b', size: 11}},
+        showlegend: true,
+        legend: {{orientation: 'h', y: -0.1}}
     }}, {{responsive: true, displayModeBar: false}});
     var tb = document.getElementById('pieTable');
     if (!tb) return;
@@ -516,7 +621,31 @@ function renderHistorical() {{
     }}).join('');
 }}
 
+function renderKpiRows() {{
+    (C.kpi_rows || []).forEach(function(row) {{
+        row.cards.forEach(function(card) {{
+            var pts = filt(DATA[card.data_key] || []);
+            var vals = pts.map(function(d) {{ return d.value; }});
+            var v = agg(vals, card.agg);
+            var el = document.getElementById(card.card_id);
+            if (el) {{
+                var dec = (card.agg === 'avg' || card.agg === 'min' || card.agg === 'max') ? 2 : 1;
+                el.innerText = vals.length ? fmt(v, dec) : '\u2014';
+            }}
+            if (vals.length) {{
+                var mn = Math.min.apply(null, vals);
+                var mx = Math.max.apply(null, vals);
+                var minEl = document.getElementById(card.card_id + '_min');
+                var maxEl = document.getElementById(card.card_id + '_max');
+                if (minEl) minEl.innerText = fmt(mn, 2);
+                if (maxEl) maxEl.innerText = fmt(mx, 2);
+            }}
+        }});
+    }});
+}}
+
 function renderAll() {{
+    renderKpiRows();
     recalcDosis();
     renderChart();
     renderBars();
@@ -527,98 +656,93 @@ function renderAll() {{
 }}
 
 window.onload = function() {{ renderAll(); }};
+
+window.addEventListener('beforeprint', function() {{
+    document.querySelectorAll('.js-plotly-plot').forEach(function(el) {{
+        Plotly.relayout(el, {{autosize: true}});
+    }});
+}});
+window.addEventListener('afterprint', function() {{
+    document.querySelectorAll('.js-plotly-plot').forEach(function(el) {{
+        Plotly.relayout(el, {{autosize: true}});
+    }});
+}});
 </script>
 </body>
 </html>"""
 
+    # ──────────────────────────────────────────
+    # Section builders
+    # ──────────────────────────────────────────
 
-def _build_sections(components: list[dict[str, Any]], config: dict[str, Any]) -> str:
-    sections = []
-    for comp in components:
-        ctype = comp.get("type")
-        if ctype == "kpi_row":
-            sections.append(_build_kpi_row(comp, config))
-        elif ctype == "text_block":
-            sections.append(_build_text_block(comp))
-        elif ctype == "line_chart":
-            sections.append(_build_line_chart(comp))
-        elif ctype == "bar_chart":
-            sections.append(_build_bar_chart(comp))
-        elif ctype == "pie_chart":
-            sections.append(_build_pie_chart(comp))
-        elif ctype == "data_table":
-            sections.append(_build_data_table(comp))
-        elif ctype == "summary":
-            sections.append(_build_summary(comp))
-        elif ctype == "historical":
-            sections.append(_build_historical(comp))
-        elif ctype == "raw_data":
-            sections.append(_build_raw_data())
-    return "\n".join(sections)
+    def _build_sections(self, components: list, config: dict) -> str:
+        sections = []
+        for comp in components:
+            ctype = comp.get("type")
+            if ctype == "kpi_row":
+                sections.append(self._build_kpi_row(comp, config))
+            elif ctype == "text_block":
+                sections.append(self._build_text_block(comp))
+            elif ctype == "line_chart":
+                sections.append(self._build_line_chart(comp))
+            elif ctype == "bar_chart":
+                sections.append(self._build_bar_chart(comp))
+            elif ctype == "pie_chart":
+                sections.append(self._build_pie_chart(comp))
+            elif ctype == "data_table":
+                sections.append(self._build_data_table(comp))
+            elif ctype == "summary":
+                sections.append(self._build_summary(comp))
+            elif ctype == "historical":
+                sections.append(self._build_historical(comp))
+            elif ctype == "raw_data":
+                pass  # always added below
+        sections.append(self._build_raw_data())
+        return "\n".join(sections)
 
-
-def _build_kpi_row(comp: dict[str, Any], config: dict[str, Any]) -> str:
-    total_maiz = config.get("total_maiz", 0)
-    dosis_obj = config.get("dosis_objetivo", 0.6)
-    description = comp.get("description", "")
-    desc_html = (
-        f'<p class="text-sm text-slate-500 mb-10 leading-relaxed">{description}</p>'
-        if description
-        else '<div class="mb-10"></div>'
-    )
-    return f"""
-<div class="grid grid-cols-4 gap-5 mb-4" id="kpiRow">
-    <div class="kpi p-5 bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl border border-blue-200/60 text-center">
-        <p class="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Total Inhimold</p>
-        <p class="text-3xl font-black text-blue-700 mt-1" id="kpiInhimold">\u2014</p>
-        <p class="text-xs text-blue-400 mt-1">Litros (suma bombas)</p>
+    def _build_kpi_row(self, comp: dict, config: dict) -> str:
+        title = comp.get("title", "")
+        cards = comp.get("cards", [])
+        comp_id = comp.get("id", "kpi")
+        title_html = f'<h4 class="section-title">{title}</h4>' if title else ""
+        n = max(len(cards), 1)
+        cols = min(n, 4)
+        cards_html = ""
+        for i, card in enumerate(cards):
+            card_id = f"kpi_{comp_id}_{i}"
+            color = card.get("color", "#3b82f6")
+            label = card.get("label", "")
+            unit = card.get("unit", "")
+            cards_html += f"""
+    <div class="p-4 bg-slate-50 rounded border border-slate-100 text-center">
+        <p class="text-[10px] font-bold text-slate-400 uppercase">{label} ({unit})</p>
+        <p class="text-2xl font-bold text-slate-800 mt-1" id="{card_id}">\u2014</p>
+        <p class="text-xs text-slate-400 mt-1">Min: <span id="{card_id}_min">\u2014</span> | Max: <span id="{card_id}_max">\u2014</span></p>
+    </div>"""
+        return f"""
+<div class="mb-8">
+    {title_html}
+    <div class="grid gap-5" style="grid-template-columns:repeat({cols},1fr)">
+        {cards_html}
     </div>
-    <div class="kpi p-5 bg-gradient-to-br from-amber-50 to-amber-100/50 rounded-xl border border-amber-200/60 text-center">
-        <p class="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Total Ma\u00edz</p>
-        <input type="number" id="inputMaiz" class="maiz-input mt-1" value="{total_maiz}" onchange="recalcDosis()" onkeyup="recalcDosis()">
-        <p class="text-xs text-amber-400 mt-1">Toneladas (editable)</p>
-    </div>
-    <div class="kpi p-5 rounded-xl border text-center relative overflow-hidden" id="dosisCard">
-        <div id="dosisBg" class="absolute inset-0 opacity-10 bg-gray-200"></div>
-        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider relative z-10">Dosis Aplicada</p>
-        <div class="flex justify-center items-center gap-2 mt-1 relative z-10">
-            <div id="dosisDot" class="w-3 h-3 rounded-full bg-gray-400"></div>
-            <p class="text-3xl font-black text-slate-700 relative z-10" id="dosisVal">\u2014</p>
-        </div>
-        <p class="text-xs text-slate-400 mt-1 relative z-10">L/Ton &mdash; Cumpl.: <span class="font-bold" id="dosisPct">\u2014</span></p>
-    </div>
-    <div class="kpi p-5 bg-gradient-to-br from-slate-50 to-slate-100/50 rounded-xl border border-slate-200/60 text-center">
-        <p class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dosis Objetivo</p>
-        <p class="text-3xl font-black text-slate-700 mt-1">{dosis_obj}</p>
-        <p class="text-xs text-slate-400 mt-1">L/Ton</p>
-    </div>
-</div>
-<div id="pumpCards" class="mb-2"></div>
-{desc_html}
-"""
+</div>"""
 
-
-def _build_text_block(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "")
-    text = comp.get("text", "")
-    title_html = f'<h4 class="section-title">{title}</h4>' if title else ""
-    return f"""
+    def _build_text_block(self, comp: dict) -> str:
+        title = comp.get("title", "")
+        text = comp.get("text", "")
+        title_html = f'<h4 class="section-title">{title}</h4>' if title else ""
+        return f"""
 <div class="bg-slate-50 rounded-xl border border-slate-200 p-6 mb-8">
     {title_html}
     <p class="text-sm text-slate-600 leading-relaxed">{text}</p>
 </div>
 """
 
-
-def _build_line_chart(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Gr\u00e1fica de Flujo")
-    desc = comp.get("description", "")
-    desc_html = (
-        f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>'
-        if desc
-        else '<div class="mb-8"></div>'
-    )
-    return f"""
+    def _build_line_chart(self, comp: dict) -> str:
+        title = comp.get("title", "Gr\u00e1fica de Flujo")
+        desc = comp.get("description", "")
+        desc_html = f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>' if desc else '<div class="mb-8"></div>'
+        return f"""
 <div class="border border-slate-200 rounded-xl p-1 mb-2 shadow-sm">
     <div class="flex justify-between items-center px-5 py-3 bg-slate-50 border-b border-slate-100 rounded-t-xl">
         <span class="text-xs font-bold text-slate-500 uppercase tracking-wide">{title}</span>
@@ -649,16 +773,11 @@ def _build_line_chart(comp: dict[str, Any]) -> str:
 {desc_html}
 """
 
-
-def _build_bar_chart(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Consumo Diario por Bomba")
-    desc = comp.get("description", "")
-    desc_html = (
-        f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>'
-        if desc
-        else '<div class="mb-8"></div>'
-    )
-    return f"""
+    def _build_bar_chart(self, comp: dict) -> str:
+        title = comp.get("title", "Consumo Diario por Bomba")
+        desc = comp.get("description", "")
+        desc_html = f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>' if desc else '<div class="mb-8"></div>'
+        return f"""
 <div class="border border-slate-200 rounded-xl p-5 mb-2 shadow-sm">
     <h4 class="section-title">{title}</h4>
     <div style="height:280px" id="plotBars"></div>
@@ -666,16 +785,11 @@ def _build_bar_chart(comp: dict[str, Any]) -> str:
 {desc_html}
 """
 
-
-def _build_pie_chart(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Distribuci\u00f3n por Variable")
-    desc = comp.get("description", "")
-    desc_html = (
-        f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>'
-        if desc
-        else '<div class="mb-8"></div>'
-    )
-    return f"""
+    def _build_pie_chart(self, comp: dict) -> str:
+        title = comp.get("title", "Distribuci\u00f3n por Variable")
+        desc = comp.get("description", "")
+        desc_html = f'<p class="text-sm text-slate-500 mb-8 leading-relaxed">{desc}</p>' if desc else '<div class="mb-8"></div>'
+        return f"""
 <div class="grid grid-cols-3 gap-8 mb-2">
     <div class="col-span-1 border border-slate-200 rounded-xl p-3" style="height:320px">
         <div id="plotPie" style="width:100%;height:100%"></div>
@@ -693,12 +807,13 @@ def _build_pie_chart(comp: dict[str, Any]) -> str:
 {desc_html}
 """
 
-
-def _build_data_table(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Tabla de Datos")
-    periods = comp.get("periods", {})
-    period_options = "".join(f'<option value="{p}">{p}</option>' for p in periods.keys())
-    return f"""
+    def _build_data_table(self, comp: dict) -> str:
+        title = comp.get("title", "Tabla de Datos")
+        periods = comp.get("periods", {})
+        period_options = "".join(
+            f'<option value="{p}">{p}</option>' for p in periods.keys()
+        )
+        return f"""
 <div class="border border-slate-200 rounded-xl p-5 mb-8 shadow-sm">
     <div class="flex justify-between items-center mb-4">
         <h4 class="section-title mb-0">{title}</h4>
@@ -719,12 +834,11 @@ def _build_data_table(comp: dict[str, Any]) -> str:
 </div>
 """
 
-
-def _build_summary(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Resumen de Dosificaci\u00f3n")
-    footer = comp.get("footer", "")
-    footer_html = f'<p class="text-xs text-slate-400 mt-3">{footer}</p>' if footer else ""
-    return f"""
+    def _build_summary(self, comp: dict) -> str:
+        title = comp.get("title", "Resumen de Dosificaci\u00f3n")
+        footer = comp.get("footer", "")
+        footer_html = f'<p class="text-xs text-slate-400 mt-3">{footer}</p>' if footer else ""
+        return f"""
 <div class="bg-slate-50 rounded-xl border border-slate-200 p-6 mb-8">
     <h4 class="section-title">{title}</h4>
     <table class="w-full">
@@ -738,10 +852,9 @@ def _build_summary(comp: dict[str, Any]) -> str:
 </div>
 """
 
-
-def _build_historical(comp: dict[str, Any]) -> str:
-    title = comp.get("title", "Hist\u00f3rico de Buques")
-    return f"""
+    def _build_historical(self, comp: dict) -> str:
+        title = comp.get("title", "Hist\u00f3rico de Buques")
+        return f"""
 <div class="mb-8">
     <h4 class="section-title">{title}</h4>
     <div class="overflow-auto rounded-xl border border-slate-200" style="max-height:500px">
@@ -760,10 +873,9 @@ def _build_historical(comp: dict[str, Any]) -> str:
 </div>
 """
 
-
-def _build_raw_data() -> str:
-    return """
-<div class="border border-slate-200 rounded-xl overflow-hidden bg-white mb-8">
+    def _build_raw_data(self) -> str:
+        return """
+<div id="rawSection" class="border border-slate-200 rounded-xl overflow-hidden bg-white mb-8">
     <button onclick="toggleRaw()" class="w-full px-6 py-3 bg-slate-50 hover:bg-slate-100 flex justify-between items-center text-sm font-bold text-slate-600 transition-colors border-b border-slate-200">
         <span>Datos Crudos <span class="text-xs font-normal text-slate-400 ml-2" id="rawCount"></span></span>
         <span id="rawArrow" class="transition-transform text-slate-400" style="display:inline-block">&#9660;</span>

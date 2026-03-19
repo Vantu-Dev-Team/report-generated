@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Sento Analytics Builder</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', sans-serif; background: #f1f5f9; margin: 0; }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+  /* ── Layout ── */
+  #app { display: flex; height: 100vh; overflow: hidden; }
+  #sidebar { width: 280px; min-width: 280px; background: white; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; overflow: hidden; }
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #topbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 0 24px; height: 56px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  #content { flex: 1; overflow-y: auto; padding: 24px; display: flex; gap: 24px; }
+
+  /* ── Sidebar sections ── */
+  .sidebar-section { padding: 16px; border-bottom: 1px solid #f1f5f9; }
+  .sidebar-label { font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+  .sidebar-scroll { flex: 1; overflow-y: auto; }
+
+  /* ── Input styles ── */
+  .inp { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #1e293b; outline: none; background: #f8fafc; transition: border-color 0.15s; }
+  .inp:focus { border-color: #3b82f6; background: white; }
+  .inp-sm { padding: 5px 8px; font-size: 12px; border-radius: 6px; }
+  .lbl { font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 3px; display: block; }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-primary:disabled { background: #93c5fd; cursor: not-allowed; }
+  .btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  .btn-secondary:hover { background: #e2e8f0; }
+  .btn-success { background: #10b981; color: white; }
+  .btn-success:hover { background: #059669; }
+  .btn-danger { background: #fee2e2; color: #ef4444; }
+  .btn-danger:hover { background: #fecaca; }
+  .btn-xs { padding: 3px 8px; font-size: 11px; border-radius: 5px; }
+
+  /* ── Device/Variable tree ── */
+  .device-item { border-radius: 8px; border: 1px solid #f1f5f9; margin-bottom: 6px; overflow: hidden; }
+  .device-header { padding: 8px 10px; cursor: pointer; display: flex; align-items: center; gap-8px; background: #f8fafc; font-size: 12px; font-weight: 600; color: #334155; user-select: none; }
+  .device-header:hover { background: #f1f5f9; }
+  .device-vars { display: none; padding: 4px 6px 6px 6px; background: white; }
+  .device-vars.open { display: block; }
+  .var-chip { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; margin: 2px 0; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 11px; color: #475569; cursor: grab; }
+  .var-chip:hover { background: #eff6ff; border-color: #bfdbfe; color: #1e40af; }
+  .var-chip .var-name { font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .var-chip .var-id { font-size: 9px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Component canvas ── */
+  #canvas { flex: 1; min-width: 0; }
+  .comp-card { background: white; border-radius: 12px; border: 1.5px solid #e2e8f0; margin-bottom: 12px; overflow: hidden; transition: box-shadow 0.15s; }
+  .comp-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.07); }
+  .comp-card.drag-ghost { opacity: 0.4; }
+  .comp-header { padding: 12px 16px; display: flex; align-items: center; gap: 10px; cursor: grab; background: #f8fafc; border-bottom: 1px solid #f1f5f9; }
+  .comp-header:active { cursor: grabbing; }
+  .drag-handle { color: #cbd5e1; font-size: 16px; cursor: grab; }
+  .comp-body { padding: 16px; }
+  .comp-type-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  /* ── Series list inside component ── */
+  .series-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 6px; }
+  .color-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .series-label { font-size: 12px; font-weight: 600; color: #334155; flex: 1; }
+  .series-key { font-size: 10px; color: #94a3b8; font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Drop zone for variables ── */
+  .drop-zone { border: 2px dashed #e2e8f0; border-radius: 8px; padding: 12px; text-align: center; font-size: 12px; color: #94a3b8; min-height: 48px; transition: all 0.15s; cursor: pointer; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: #3b82f6; background: #eff6ff; color: #3b82f6; }
+
+  /* ── Config panel (right) ── */
+  #config-panel { width: 320px; min-width: 320px; background: white; border-left: 1px solid #e2e8f0; overflow-y: auto; padding: 20px; display: none; }
+  #config-panel.open { display: block; }
+  .config-section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid #f1f5f9; }
+  .config-title { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 12px; }
+
+  /* ── Component type palette ── */
+  .palette-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .palette-item { padding: 10px; border: 1.5px solid #e2e8f0; border-radius: 10px; cursor: pointer; text-align: center; transition: all 0.15s; background: white; }
+  .palette-item:hover { border-color: #3b82f6; background: #eff6ff; }
+  .palette-icon { font-size: 20px; margin-bottom: 4px; }
+  .palette-name { font-size: 11px; font-weight: 600; color: #475569; }
+
+  /* ── Status / toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 12px 20px; border-radius: 10px; font-size: 13px; font-weight: 500; opacity: 0; transform: translateY(10px); transition: all 0.3s; pointer-events: none; z-index: 9999; max-width: 320px; }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.success { background: #10b981; }
+  #toast.error { background: #ef4444; }
+
+  /* ── Tabs ── */
+  .tab-bar { display: flex; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+  .tab { padding: 10px 16px; font-size: 12px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .tab.active { color: #3b82f6; border-bottom-color: #3b82f6; background: white; }
+
+  /* ── Historical rows ── */
+  .hist-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+
+  /* ── Spinner ── */
+  .spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Loading overlay ── */
+  #loading { display: none; position: fixed; inset: 0; background: rgba(255,255,255,0.85); z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 16px; }
+  #loading.show { display: flex; }
+  .loading-spinner { width: 40px; height: 40px; border: 3px solid #e2e8f0; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.7s linear infinite; }
+
+  /* ── Modal ── */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .modal-box { background: white; border-radius: 16px; padding: 28px; width: 520px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+  .modal-title { font-size: 16px; font-weight: 800; color: #1e293b; margin-bottom: 20px; }
+
+  /* ── Empty state ── */
+  .empty-state { text-align: center; padding: 60px 20px; color: #94a3b8; }
+  .empty-icon { font-size: 48px; margin-bottom: 12px; }
+  .empty-msg { font-size: 14px; font-weight: 600; margin-bottom: 6px; color: #64748b; }
+  .empty-sub { font-size: 12px; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loading">
+  <div class="loading-spinner"></div>
+  <p class="text-sm font-semibold text-slate-600" id="loadingMsg">Cargando...</p>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Modal container -->
+<div id="modal-container"></div>
+
+<div id="app">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <div id="sidebar">
+    <!-- Token section -->
+    <div class="sidebar-section">
+      <div class="sidebar-label">Conexión Ubidots</div>
+      <input class="inp inp-sm mb-2" id="tokenInput" type="password" placeholder="Token BBFF-..." autocomplete="off">
+      <button class="btn btn-primary w-full text-sm" id="connectBtn" onclick="connectUbidots()" style="justify-content:center">
+        <span id="connectBtnText">Conectar</span>
+      </button>
+      <p id="connectStatus" class="text-[11px] text-slate-400 mt-2 text-center"></p>
+    </div>
+
+    <!-- Device/Variable browser -->
+    <div class="sidebar-section" style="padding-bottom:8px">
+      <div class="sidebar-label">Dispositivos y Variables</div>
+      <input class="inp inp-sm" id="deviceSearch" placeholder="Buscar dispositivo..." oninput="filterDevices()" style="margin-bottom:8px">
+    </div>
+    <div class="sidebar-scroll px-3 py-2" id="deviceTree">
+      <div class="empty-state" style="padding:30px 10px">
+        <div class="empty-icon">📡</div>
+        <p class="empty-msg">Sin conexión</p>
+        <p class="empty-sub">Ingresa tu token y conecta</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ MAIN ═══ -->
+  <div id="main">
+    <!-- Topbar -->
+    <div id="topbar">
+      <div class="flex items-center gap-4">
+        <img src="https://sento-logo-publico.s3.us-east-1.amazonaws.com/Sento+Logo+jul+2024+2.png" style="height:28px;opacity:0.85">
+        <span class="text-sm font-bold text-slate-700">Analytics Builder</span>
+        <span class="text-slate-300">|</span>
+        <div class="tab-bar" style="border:none;background:transparent">
+          <div class="tab active" id="tab-canvas" onclick="switchTab('canvas')">Componentes</div>
+          <div class="tab" id="tab-config" onclick="switchTab('config')">Configuración</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <button class="btn btn-secondary btn-xs" onclick="clearCanvas()">Limpiar</button>
+        <button class="btn btn-success" id="generateBtn" onclick="generateReport()" disabled>
+          <span>⬇ Generar Informe</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Content area -->
+    <div id="content">
+
+      <!-- ── Canvas + palette panel ── -->
+      <div id="panel-canvas" style="display:flex;gap:24px;flex:1;min-width:0">
+        <!-- Component palette -->
+        <div style="width:200px;min-width:200px">
+          <div class="sidebar-label" style="padding:0 0 8px 0">Añadir componente</div>
+          <div class="palette-grid">
+            <div class="palette-item" onclick="addComponent('kpi_row')" title="Fila de KPIs con dosis">
+              <div class="palette-icon">📊</div>
+              <div class="palette-name">KPI / Dosis</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('line_chart')" title="Gráfica de líneas temporal">
+              <div class="palette-icon">📈</div>
+              <div class="palette-name">Gráfica Líneas</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('bar_chart')" title="Barras diarias por variable">
+              <div class="palette-icon">📉</div>
+              <div class="palette-name">Gráfica Barras</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('pie_chart')" title="Distribución / torta">
+              <div class="palette-icon">🥧</div>
+              <div class="palette-name">Distribución</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('data_table')" title="Tabla de datos con período">
+              <div class="palette-icon">📋</div>
+              <div class="palette-name">Tabla Datos</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('summary')" title="Resumen de dosificación">
+              <div class="palette-icon">🧾</div>
+              <div class="palette-name">Resumen Dosis</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('historical')" title="Histórico de barcos">
+              <div class="palette-icon">🚢</div>
+              <div class="palette-name">Histórico</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('text_block')" title="Bloque de texto libre">
+              <div class="palette-icon">📝</div>
+              <div class="palette-name">Texto</div>
+            </div>
+            <div class="palette-item" onclick="addComponent('raw_data')" title="Tabla de datos crudos">
+              <div class="palette-icon">🔍</div>
+              <div class="palette-name">Datos Crudos</div>
+            </div>
+          </div>
+          <div class="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-xl">
+            <p class="text-[11px] font-semibold text-blue-600 mb-1">💡 Cómo usar</p>
+            <ol class="text-[11px] text-blue-500 leading-relaxed list-decimal list-inside space-y-1">
+              <li>Conecta tu token Ubidots</li>
+              <li>Agrega componentes al canvas</li>
+              <li>Arrastra variables a cada componente</li>
+              <li>Configura en la pestaña "Configuración"</li>
+              <li>Genera el informe HTML</li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Component canvas -->
+        <div id="canvas">
+          <div id="compList">
+            <div class="empty-state" id="emptyCanvas">
+              <div class="empty-icon">🏗️</div>
+              <p class="empty-msg">Canvas vacío</p>
+              <p class="empty-sub">Agrega componentes desde el panel izquierdo</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Config panel (hidden by default) ── -->
+      <div id="panel-config" style="display:none;flex:1;max-width:600px">
+        <div class="bg-white rounded-2xl border border-slate-200 p-6">
+          <p class="text-sm font-bold text-slate-700 mb-5">Configuración del Reporte</p>
+
+          <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label class="lbl">Título Principal</label>
+              <input class="inp" id="cfgTitulo" placeholder="Informe Aliansa...">
+            </div>
+            <div>
+              <label class="lbl">Subtítulo / Barco</label>
+              <input class="inp" id="cfgSubtitulo" placeholder="ORIENT PEACE-ANHUI">
+            </div>
+            <div>
+              <label class="lbl">Autor</label>
+              <input class="inp" id="cfgAutor" placeholder="Eliana">
+            </div>
+            <div>
+              <label class="lbl">Timezone (offset horas)</label>
+              <input class="inp" id="cfgTz" type="number" value="-5" min="-12" max="14">
+            </div>
+            <div>
+              <label class="lbl">Fecha inicio</label>
+              <input class="inp" id="cfgFechaInicio" type="date">
+            </div>
+            <div>
+              <label class="lbl">Fecha fin</label>
+              <input class="inp" id="cfgFechaFin" type="date">
+            </div>
+            <div>
+              <label class="lbl">Total Maíz (Ton)</label>
+              <input class="inp" id="cfgMaiz" type="number" placeholder="10800">
+            </div>
+            <div>
+              <label class="lbl">Dosis Objetivo (L/Ton)</label>
+              <input class="inp" id="cfgDosis" type="number" step="0.01" placeholder="0.60">
+            </div>
+          </div>
+
+          <!-- Historical data table editor -->
+          <div class="mt-6">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-bold text-slate-500 uppercase">Datos Históricos (Buques)</p>
+              <button class="btn btn-secondary btn-xs" onclick="addHistRow()">+ Agregar fila</button>
+            </div>
+            <div id="histTableEditor" class="overflow-auto" style="max-height:280px">
+              <table class="w-full" style="border-collapse:separate;border-spacing:0 4px">
+                <thead>
+                  <tr>
+                    <th class="text-left text-[10px] font-bold text-slate-400 pb-1" style="width:50px">Año</th>
+                    <th class="text-left text-[10px] font-bold text-slate-400 pb-1">Buque</th>
+                    <th class="text-left text-[10px] font-bold text-slate-400 pb-1" style="width:90px">Inhimold (L)</th>
+                    <th class="text-left text-[10px] font-bold text-slate-400 pb-1" style="width:80px">Maíz (Ton)</th>
+                    <th class="text-left text-[10px] font-bold text-slate-400 pb-1" style="width:70px">D.Obj.</th>
+                    <th style="width:28px"></th>
+                  </tr>
+                </thead>
+                <tbody id="histRows"></tbody>
+              </table>
+            </div>
+            <div class="mt-3 flex gap-2">
+              <button class="btn btn-secondary btn-xs" onclick="importHistFromExcel()">📥 Importar desde JSON</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /content -->
+  </div><!-- /main -->
+
+</div><!-- /app -->
+
+
+<!-- ══════════════════════════════════════════
+     VARIABLE ASSIGNMENT MODAL
+══════════════════════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let state = {
+  token: '',
+  devices: [],         // [{label, name, id}]
+  variables: {},       // device_label -> [{label, name, id}]
+  components: [],      // [{id, type, title, ...}]
+  histRows: [],        // [{year, barco, inhimold, maiz, dosis_esperada}]
+};
+
+const PALETTE_COLORS = ['#3b82f6','#8b5cf6','#10b981','#f59e0b','#ef4444','#06b6d4','#ec4899','#84cc16'];
+let colorIdx = 0;
+function nextColor() { return PALETTE_COLORS[colorIdx++ % PALETTE_COLORS.length]; }
+
+const COMP_TYPES = {
+  kpi_row:    { label: 'KPI / Dosis', icon: '📊', color: '#dbeafe', textColor: '#1e40af' },
+  line_chart: { label: 'Gráfica de Líneas', icon: '📈', color: '#dcfce7', textColor: '#166534' },
+  bar_chart:  { label: 'Gráfica de Barras', icon: '📉', color: '#ede9fe', textColor: '#4c1d95' },
+  pie_chart:  { label: 'Distribución / Torta', icon: '🥧', color: '#fef9c3', textColor: '#713f12' },
+  data_table: { label: 'Tabla de Datos', icon: '📋', color: '#f1f5f9', textColor: '#1e293b' },
+  summary:    { label: 'Resumen Dosificación', icon: '🧾', color: '#dcfce7', textColor: '#166534' },
+  historical: { label: 'Histórico Buques', icon: '🚢', color: '#f0f9ff', textColor: '#0c4a6e' },
+  text_block: { label: 'Bloque de Texto', icon: '📝', color: '#f8fafc', textColor: '#475569' },
+  raw_data:   { label: 'Datos Crudos', icon: '🔍', color: '#fafafa', textColor: '#374151' },
+};
+
+// ─────────────────────────────────────────────
+// Toast
+// ─────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+}
+
+// ─────────────────────────────────────────────
+// Loading
+// ─────────────────────────────────────────────
+function showLoading(msg = 'Cargando...') {
+  document.getElementById('loadingMsg').textContent = msg;
+  document.getElementById('loading').classList.add('show');
+}
+function hideLoading() { document.getElementById('loading').classList.remove('show'); }
+
+// ─────────────────────────────────────────────
+// API helpers
+// ─────────────────────────────────────────────
+async function apiFetch(url, opts = {}) {
+  const r = await fetch(url, opts);
+  if (!r.ok) { const t = await r.text(); throw new Error(t); }
+  return r.json();
+}
+
+// ─────────────────────────────────────────────
+// Connect to Ubidots
+// ─────────────────────────────────────────────
+async function connectUbidots() {
+  const token = document.getElementById('tokenInput').value.trim();
+  if (!token) { showToast('Ingresa el token Ubidots', 'error'); return; }
+  state.token = token;
+  const btn = document.getElementById('connectBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div> Conectando...';
+  document.getElementById('connectStatus').textContent = '';
+  try {
+    const data = await apiFetch(`/api/devices?token=${encodeURIComponent(token)}&page_size=200`);
+    state.devices = (data.results || []).map(d => ({
+      label: d.label, name: d.name || d.label, id: d.id
+    }));
+    renderDeviceTree(state.devices);
+    document.getElementById('connectStatus').textContent = `✓ ${state.devices.length} dispositivos`;
+    document.getElementById('connectStatus').style.color = '#10b981';
+    document.getElementById('generateBtn').disabled = false;
+    showToast(`Conectado — ${state.devices.length} dispositivos`, 'success');
+  } catch(e) {
+    showToast('Error de conexión: ' + e.message, 'error');
+    document.getElementById('connectStatus').textContent = '✗ Error de conexión';
+    document.getElementById('connectStatus').style.color = '#ef4444';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span id="connectBtnText">Reconectar</span>';
+  }
+}
+
+// ─────────────────────────────────────────────
+// Device tree
+// ─────────────────────────────────────────────
+function renderDeviceTree(devices) {
+  const tree = document.getElementById('deviceTree');
+  if (!devices.length) {
+    tree.innerHTML = '<div class="empty-state" style="padding:20px"><p class="empty-msg">Sin dispositivos</p></div>';
+    return;
+  }
+  tree.innerHTML = devices.map(d => `
+    <div class="device-item" data-label="${d.label}">
+      <div class="device-header" onclick="toggleDevice('${d.label}', this)">
+        <span style="margin-right:6px;color:#94a3b8">▶</span>
+        <span style="flex:1;font-size:12px">${d.name}</span>
+        <span style="font-size:10px;color:#94a3b8;font-family:'JetBrains Mono',monospace">${d.label}</span>
+      </div>
+      <div class="device-vars" id="vars-${d.label}">
+        <div style="padding:8px;text-align:center;font-size:11px;color:#94a3b8">Click para cargar variables</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleDevice(label, headerEl) {
+  const varsEl = document.getElementById(`vars-${label}`);
+  const arrow = headerEl.querySelector('span:first-child');
+  const isOpen = varsEl.classList.contains('open');
+
+  if (isOpen) {
+    varsEl.classList.remove('open');
+    arrow.textContent = '▶';
+    return;
+  }
+
+  // Load variables if not loaded yet
+  if (!state.variables[label]) {
+    varsEl.innerHTML = '<div style="padding:8px;text-align:center;font-size:11px;color:#94a3b8">Cargando...</div>';
+    try {
+      const data = await apiFetch(`/api/variables?token=${encodeURIComponent(state.token)}&device_label=${encodeURIComponent(label)}&page_size=200`);
+      state.variables[label] = (data.results || []).map(v => ({
+        id: v.id, label: v.label, name: v.name || v.label, device_label: label
+      }));
+    } catch(e) {
+      varsEl.innerHTML = '<div style="padding:8px;text-align:center;font-size:11px;color:#ef4444">Error al cargar</div>';
+      return;
+    }
+  }
+
+  const vars = state.variables[label] || [];
+  if (!vars.length) {
+    varsEl.innerHTML = '<div style="padding:8px;text-align:center;font-size:11px;color:#94a3b8">Sin variables</div>';
+  } else {
+    varsEl.innerHTML = vars.map(v => `
+      <div class="var-chip" data-var-id="${v.id}" data-var-label="${v.label}" data-var-name="${v.name}" data-device="${label}"
+           onclick="showAssignModal('${v.id}', '${v.label}', '${v.name}', '${label}')">
+        <div>
+          <div class="var-name">${v.name}</div>
+          <div class="var-id">${v.label}</div>
+        </div>
+        <span style="font-size:16px;color:#cbd5e1">→</span>
+      </div>
+    `).join('');
+  }
+  varsEl.classList.add('open');
+  arrow.textContent = '▼';
+}
+
+function filterDevices() {
+  const q = document.getElementById('deviceSearch').value.toLowerCase();
+  document.querySelectorAll('.device-item').forEach(el => {
+    const label = el.dataset.label || '';
+    const name = el.querySelector('.device-header span:nth-child(2)')?.textContent.toLowerCase() || '';
+    el.style.display = (!q || label.includes(q) || name.includes(q)) ? '' : 'none';
+  });
+}
+
+// ─────────────────────────────────────────────
+// Component management
+// ─────────────────────────────────────────────
+let compIdCounter = 1;
+
+function addComponent(type) {
+  const id = `comp_${compIdCounter++}`;
+  const comp = { id, type, title: COMP_TYPES[type]?.label || type };
+
+  // Type-specific defaults
+  if (type === 'kpi_row') { comp.cards = []; comp.description = ''; }
+  else if (type === 'line_chart') { comp.series = []; comp.description = ''; }
+  else if (type === 'bar_chart') { comp.series = []; comp.description = ''; }
+  else if (type === 'pie_chart') { comp.series = []; comp.description = ''; }
+  else if (type === 'data_table') { comp.periods = { 'Por Hora': [], 'Diario': [] }; }
+  else if (type === 'summary') { comp.footer = ''; }
+  else if (type === 'historical') { comp.rows = []; }
+  else if (type === 'text_block') { comp.text = ''; }
+  else if (type === 'raw_data') {}
+
+  state.components.push(comp);
+  renderCanvas();
+  showToast(`Componente "${COMP_TYPES[type]?.label}" agregado`);
+
+  // Scroll to new component
+  setTimeout(() => {
+    const el = document.getElementById(`card-${id}`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, 100);
+}
+
+function removeComponent(id) {
+  state.components = state.components.filter(c => c.id !== id);
+  renderCanvas();
+}
+
+function removeSeries(compId, seriesIdx, periodKey = null) {
+  const comp = state.components.find(c => c.id === compId);
+  if (!comp) return;
+  if (periodKey !== null) {
+    comp.periods[periodKey].splice(seriesIdx, 1);
+  } else if (comp.series) {
+    comp.series.splice(seriesIdx, 1);
+  } else if (comp.cards) {
+    comp.cards.splice(seriesIdx, 1);
+  }
+  renderCanvas();
+}
+
+// ─────────────────────────────────────────────
+// Canvas render
+// ─────────────────────────────────────────────
+function renderCanvas() {
+  const list = document.getElementById('compList');
+  const empty = document.getElementById('emptyCanvas');
+
+  if (!state.components.length) {
+    list.innerHTML = '';
+    if (!document.getElementById('emptyCanvas')) {
+      const e = document.createElement('div');
+      e.id = 'emptyCanvas';
+      e.className = 'empty-state';
+      e.innerHTML = '<div class="empty-icon">🏗️</div><p class="empty-msg">Canvas vacío</p><p class="empty-sub">Agrega componentes desde el panel izquierdo</p>';
+      list.appendChild(e);
+    }
+    return;
+  }
+
+  list.innerHTML = state.components.map(comp => renderCompCard(comp)).join('');
+  initSortable();
+}
+
+function renderCompCard(comp) {
+  const meta = COMP_TYPES[comp.type] || {};
+  const badge = `<span class="comp-type-badge" style="background:${meta.color};color:${meta.textColor}">${meta.icon} ${meta.label}</span>`;
+
+  let body = '';
+  if (comp.type === 'kpi_row') {
+    body = renderSeriesBody(comp.id, comp.cards || [], 'kpi_row', 'cards');
+  } else if (comp.type === 'line_chart' || comp.type === 'bar_chart' || comp.type === 'pie_chart') {
+    body = renderSeriesBody(comp.id, comp.series || [], comp.type, 'series');
+  } else if (comp.type === 'data_table') {
+    body = renderTablePeriods(comp);
+  } else if (comp.type === 'text_block') {
+    body = `<textarea class="inp w-full" rows="3" placeholder="Texto de descripción..." onchange="updateCompProp('${comp.id}','text',this.value)">${comp.text || ''}</textarea>`;
+  } else if (comp.type === 'historical') {
+    body = `<p class="text-xs text-slate-400">Las filas históricas se editan en la pestaña <strong>Configuración</strong>.</p>`;
+  } else if (comp.type === 'summary') {
+    body = `<p class="text-xs text-slate-400">Se calcula automáticamente desde las bombas (Barras). Agrega un componente de Gráfica de Barras con las series de flujo diario.</p>`;
+  } else if (comp.type === 'raw_data') {
+    body = `<p class="text-xs text-slate-400">Muestra todos los puntos crudos del rango de fechas.</p>`;
+  }
+
+  return `
+    <div class="comp-card" id="card-${comp.id}">
+      <div class="comp-header">
+        <span class="drag-handle">⠿</span>
+        ${badge}
+        <input class="inp inp-sm flex-1" style="min-width:0;max-width:260px" value="${comp.title || ''}" placeholder="Título del componente" onchange="updateCompProp('${comp.id}','title',this.value)">
+        <button class="btn btn-danger btn-xs ml-auto" onclick="removeComponent('${comp.id}')">✕</button>
+      </div>
+      <div class="comp-body">${body}</div>
+    </div>
+  `;
+}
+
+function renderSeriesBody(compId, series, type, field) {
+  const isKPI = type === 'kpi_row';
+  const label = isKPI ? 'variable KPI' : 'serie de datos';
+  const seriesHtml = series.map((s, i) => `
+    <div class="series-item">
+      <div class="color-dot" style="background:${s.color || '#94a3b8'}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="series-label">${s.label || s.name || s.data_key || '—'}</div>
+        <div class="series-key">${s.data_key || ''}</div>
+      </div>
+      <input type="color" value="${s.color || '#3b82f6'}" style="width:24px;height:24px;border:none;background:none;cursor:pointer;padding:0"
+             onchange="updateSeriesColor('${compId}','${field}',${i},this.value)">
+      <button class="btn btn-danger btn-xs" onclick="removeSeries('${compId}',${i})">✕</button>
+    </div>
+  `).join('');
+
+  return `
+    ${seriesHtml}
+    <div class="drop-zone mt-2" onclick="openVariablePicker('${compId}','${field}',null)" style="cursor:pointer">
+      <span style="font-size:18px">+</span>
+      <span class="ml-1">Click para agregar ${label}</span>
+    </div>
+  `;
+}
+
+function renderTablePeriods(comp) {
+  return Object.entries(comp.periods || {}).map(([period, series]) => `
+    <div class="mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <p class="text-xs font-bold text-slate-500 uppercase">${period}</p>
+      </div>
+      ${series.map((s, i) => `
+        <div class="series-item">
+          <div class="color-dot" style="background:${s.color || '#94a3b8'}"></div>
+          <div style="flex:1;min-width:0">
+            <div class="series-label">${s.label || s.data_key || '—'}</div>
+            <div class="series-key">${s.data_key || ''}</div>
+          </div>
+          <button class="btn btn-danger btn-xs" onclick="removeSeries('${comp.id}',${i},'${period}')">✕</button>
+        </div>
+      `).join('')}
+      <div class="drop-zone mt-1" onclick="openVariablePicker('${comp.id}','periods','${period}')" style="cursor:pointer">
+        <span style="font-size:16px">+</span> Agregar serie (${period})
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateCompProp(compId, prop, value) {
+  const comp = state.components.find(c => c.id === compId);
+  if (comp) comp[prop] = value;
+}
+
+function updateSeriesColor(compId, field, idx, color) {
+  const comp = state.components.find(c => c.id === compId);
+  if (!comp) return;
+  if (field === 'series' && comp.series) comp.series[idx].color = color;
+  else if (field === 'cards' && comp.cards) comp.cards[idx].color = color;
+}
+
+// ─────────────────────────────────────────────
+// Variable picker modal
+// ─────────────────────────────────────────────
+function openVariablePicker(compId, field, periodKey) {
+  if (!state.token) { showToast('Primero conecta tu token Ubidots', 'error'); return; }
+  if (!state.devices.length) { showToast('No hay dispositivos cargados', 'error'); return; }
+
+  const allVars = [];
+  Object.entries(state.variables).forEach(([deviceLabel, vars]) => {
+    vars.forEach(v => {
+      allVars.push({ ...v, device_label: deviceLabel });
+    });
+  });
+
+  const comp = state.components.find(c => c.id === compId);
+  const compType = comp?.type;
+
+  let listHtml;
+  if (!allVars.length) {
+    listHtml = `
+      <p class="text-xs text-slate-400 mb-4">Expande los dispositivos en el sidebar izquierdo para cargar sus variables, luego vuelve aquí.</p>
+      <div id="deviceExpandList">
+        ${state.devices.map(d => `
+          <div class="series-item cursor-pointer hover:bg-blue-50" onclick="loadDeviceVarsInModal('${d.label}')">
+            <span class="text-sm font-semibold text-slate-700 flex-1">${d.name}</span>
+            <span class="text-xs text-slate-400">${d.label}</span>
+            <span class="text-xs btn btn-secondary btn-xs ml-2">Cargar vars</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  } else {
+    listHtml = `
+      <input class="inp inp-sm mb-3" id="varPickerSearch" placeholder="Buscar variable..." oninput="filterVarPicker()">
+      <div id="varPickerList" style="max-height:350px;overflow-y:auto">
+        ${allVars.map((v, i) => `
+          <div class="series-item cursor-pointer hover:bg-blue-50" style="cursor:pointer" data-var-idx="${i}"
+               onclick="assignVariable('${compId}','${field}','${periodKey}','${v.id}','${v.label}','${v.name}','${v.device_label}')">
+            <div style="flex:1">
+              <div class="series-label">${v.name}</div>
+              <div class="series-key">${v.device_label} → ${v.label}</div>
+            </div>
+            <span style="color:#3b82f6;font-size:18px">→</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.id = 'varPickerModal';
+  modal.innerHTML = `
+    <div class="modal-box">
+      <div class="flex items-center justify-between mb-5">
+        <p class="modal-title mb-0">Seleccionar Variable Ubidots</p>
+        <button onclick="closeModal('varPickerModal')" class="btn btn-secondary btn-xs">✕</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">Componente: <strong>${comp?.title}</strong> ${periodKey ? `· Período: <strong>${periodKey}</strong>` : ''}</p>
+      ${listHtml}
+      <div class="mt-4 border-t border-slate-100 pt-4">
+        <p class="text-xs font-bold text-slate-500 mb-2">O ingresa manualmente:</p>
+        <div class="flex gap-2">
+          <div class="flex-1">
+            <label class="lbl">Etiqueta del dispositivo</label>
+            <input class="inp inp-sm" id="manualDevice" placeholder="aliansa-b1">
+          </div>
+          <div class="flex-1">
+            <label class="lbl">Etiqueta de la variable</label>
+            <input class="inp inp-sm" id="manualVar" placeholder="caudal-hora">
+          </div>
+          <div class="flex-1">
+            <label class="lbl">Nombre a mostrar</label>
+            <input class="inp inp-sm" id="manualName" placeholder="Bomba 1 Hora">
+          </div>
+          <div style="display:flex;align-items:flex-end">
+            <button class="btn btn-primary btn-xs" onclick="assignManual('${compId}','${field}','${periodKey}')">Agregar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal('varPickerModal'); });
+}
+
+async function loadDeviceVarsInModal(deviceLabel) {
+  const expandList = document.getElementById('deviceExpandList');
+  if (!expandList) return;
+  try {
+    if (!state.variables[deviceLabel]) {
+      const data = await apiFetch(`/api/variables?token=${encodeURIComponent(state.token)}&device_label=${encodeURIComponent(deviceLabel)}&page_size=200`);
+      state.variables[deviceLabel] = (data.results || []).map(v => ({
+        id: v.id, label: v.label, name: v.name || v.label, device_label: deviceLabel
+      }));
+      // Also update sidebar
+      renderDeviceTree(state.devices);
+    }
+    showToast(`${state.variables[deviceLabel].length} variables cargadas`, 'success');
+    // Reopen modal with same context — just close and reopen not possible without context, so show a note
+    expandList.innerHTML = `<p class="text-xs text-green-600 font-semibold">✓ Variables de "${deviceLabel}" cargadas. Cierra este modal y vuelve a hacer click en "+ Agregar".</p>`;
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  }
+}
+
+function filterVarPicker() {
+  const q = document.getElementById('varPickerSearch').value.toLowerCase();
+  document.querySelectorAll('#varPickerList .series-item').forEach(el => {
+    const text = el.textContent.toLowerCase();
+    el.style.display = (!q || text.includes(q)) ? '' : 'none';
+  });
+}
+
+function assignVariable(compId, field, periodKey, varId, varLabel, varName, deviceLabel) {
+  const dataKey = `${deviceLabel}::${varLabel}`;
+  _doAssign(compId, field, periodKey, { id: varId, label: varLabel, name: varName, device_label: deviceLabel, data_key: dataKey });
+}
+
+function assignManual(compId, field, periodKey) {
+  const device = document.getElementById('manualDevice').value.trim();
+  const varLbl = document.getElementById('manualVar').value.trim();
+  const name = document.getElementById('manualName').value.trim() || varLbl;
+  if (!device || !varLbl) { showToast('Ingresa dispositivo y variable', 'error'); return; }
+  const dataKey = `${device}::${varLbl}`;
+  _doAssign(compId, field, periodKey, { id: null, label: varLbl, name, device_label: device, data_key: dataKey });
+}
+
+function _doAssign(compId, field, periodKey, varObj) {
+  const comp = state.components.find(c => c.id === compId);
+  if (!comp) return;
+
+  const series = {
+    id: varObj.id,
+    label: varObj.name,
+    data_key: varObj.data_key,
+    device_label: varObj.device_label,
+    var_label: varObj.label,
+    color: nextColor(),
+    unit: 'Litros',
+    agg: 'sum',
+  };
+
+  if (field === 'series') { comp.series = comp.series || []; comp.series.push(series); }
+  else if (field === 'cards') { comp.cards = comp.cards || []; comp.cards.push(series); }
+  else if (field === 'periods' && periodKey) {
+    comp.periods = comp.periods || {};
+    comp.periods[periodKey] = comp.periods[periodKey] || [];
+    comp.periods[periodKey].push(series);
+  }
+
+  closeModal('varPickerModal');
+  renderCanvas();
+  showToast(`Variable "${varObj.name}" asignada`);
+}
+
+function closeModal(id) {
+  const m = document.getElementById(id);
+  if (m) m.remove();
+}
+
+// ─────────────────────────────────────────────
+// Assign variable directly from sidebar
+// ─────────────────────────────────────────────
+function showAssignModal(varId, varLabel, varName, deviceLabel) {
+  if (!state.components.length) {
+    showToast('Agrega un componente primero', 'error');
+    return;
+  }
+  const dataKey = `${deviceLabel}::${varLabel}`;
+
+  const modal = document.createElement('div');
+  modal.className = 'modal-backdrop';
+  modal.id = 'sidebarAssignModal';
+  modal.innerHTML = `
+    <div class="modal-box" style="width:440px">
+      <div class="flex items-center justify-between mb-4">
+        <p class="modal-title mb-0">Asignar Variable</p>
+        <button onclick="closeModal('sidebarAssignModal')" class="btn btn-secondary btn-xs">✕</button>
+      </div>
+      <div class="bg-slate-50 rounded-xl p-3 mb-4">
+        <p class="text-xs font-bold text-slate-500">${varName}</p>
+        <p class="text-[11px] text-slate-400 font-mono">${deviceLabel} → ${varLabel}</p>
+      </div>
+      <p class="text-xs font-bold text-slate-600 mb-3">¿A qué componente asignar?</p>
+      <div style="max-height:300px;overflow-y:auto">
+        ${state.components.map(comp => {
+          const meta = COMP_TYPES[comp.type] || {};
+          const hasPeriods = comp.type === 'data_table';
+          if (hasPeriods) {
+            return Object.keys(comp.periods || {}).map(period => `
+              <div class="series-item cursor-pointer hover:bg-blue-50" style="cursor:pointer"
+                   onclick="_doAssign('${comp.id}','periods','${period}',{id:'${varId}',label:'${varLabel}',name:'${varName}',device_label:'${deviceLabel}',data_key:'${dataKey}'});closeModal('sidebarAssignModal')">
+                <span style="font-size:18px">${meta.icon}</span>
+                <div style="flex:1">
+                  <div class="series-label">${comp.title} — ${period}</div>
+                  <div class="series-key">${comp.type}</div>
+                </div>
+                <span style="color:#3b82f6">→</span>
+              </div>
+            `).join('');
+          }
+          const field = comp.type === 'kpi_row' ? 'cards' : 'series';
+          return `
+            <div class="series-item cursor-pointer hover:bg-blue-50" style="cursor:pointer"
+                 onclick="_doAssign('${comp.id}','${field}',null,{id:'${varId}',label:'${varLabel}',name:'${varName}',device_label:'${deviceLabel}',data_key:'${dataKey}'});closeModal('sidebarAssignModal')">
+              <span style="font-size:18px">${meta.icon}</span>
+              <div style="flex:1">
+                <div class="series-label">${comp.title}</div>
+                <div class="series-key">${comp.type}</div>
+              </div>
+              <span style="color:#3b82f6">→</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal('sidebarAssignModal'); });
+}
+
+// ─────────────────────────────────────────────
+// SortableJS for component reordering
+// ─────────────────────────────────────────────
+let sortable;
+function initSortable() {
+  const list = document.getElementById('compList');
+  if (sortable) sortable.destroy();
+  sortable = Sortable.create(list, {
+    animation: 150,
+    handle: '.drag-handle',
+    ghostClass: 'drag-ghost',
+    onEnd(evt) {
+      const moved = state.components.splice(evt.oldIndex, 1)[0];
+      state.components.splice(evt.newIndex, 0, moved);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+// Clear canvas
+// ─────────────────────────────────────────────
+function clearCanvas() {
+  if (!state.components.length) return;
+  if (!confirm('¿Limpiar todos los componentes?')) return;
+  state.components = [];
+  renderCanvas();
+}
+
+// ─────────────────────────────────────────────
+// Tab switching
+// ─────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('panel-canvas').style.display = tab === 'canvas' ? 'flex' : 'none';
+  document.getElementById('panel-config').style.display = tab === 'config' ? 'block' : 'none';
+  document.getElementById('tab-canvas').className = 'tab ' + (tab === 'canvas' ? 'active' : '');
+  document.getElementById('tab-config').className = 'tab ' + (tab === 'config' ? 'active' : '');
+}
+
+// ─────────────────────────────────────────────
+// Historical rows editor
+// ─────────────────────────────────────────────
+function addHistRow(row = {}) {
+  state.histRows.push({
+    year: row.year || new Date().getFullYear().toString(),
+    barco: row.barco || '',
+    inhimold: row.inhimold || 0,
+    maiz: row.maiz || 0,
+    dosis_esperada: row.dosis_esperada || 0.6,
+  });
+  renderHistRows();
+}
+
+function renderHistRows() {
+  const tbody = document.getElementById('histRows');
+  tbody.innerHTML = state.histRows.map((r, i) => `
+    <tr>
+      <td><input class="inp inp-sm" style="width:60px" value="${r.year}" onchange="updateHistRow(${i},'year',this.value)"></td>
+      <td><input class="inp inp-sm" style="width:100%" value="${r.barco}" onchange="updateHistRow(${i},'barco',this.value)"></td>
+      <td><input class="inp inp-sm" style="width:100%" type="number" value="${r.inhimold}" onchange="updateHistRow(${i},'inhimold',parseFloat(this.value))"></td>
+      <td><input class="inp inp-sm" style="width:100%" type="number" value="${r.maiz}" onchange="updateHistRow(${i},'maiz',parseFloat(this.value))"></td>
+      <td><input class="inp inp-sm" style="width:60px" type="number" step="0.01" value="${r.dosis_esperada}" onchange="updateHistRow(${i},'dosis_esperada',parseFloat(this.value))"></td>
+      <td><button class="btn btn-danger btn-xs" onclick="removeHistRow(${i})">✕</button></td>
+    </tr>
+  `).join('');
+}
+
+function updateHistRow(i, key, val) { state.histRows[i][key] = val; }
+function removeHistRow(i) { state.histRows.splice(i, 1); renderHistRows(); }
+
+function importHistFromExcel() {
+  const json = prompt('Pega el JSON del histórico (array de {year,barco,inhimold,maiz,dosis,dosis_esperada}):');
+  if (!json) return;
+  try {
+    const rows = JSON.parse(json);
+    rows.forEach(r => addHistRow(r));
+    showToast(`${rows.length} filas importadas`, 'success');
+  } catch(e) {
+    showToast('JSON inválido: ' + e.message, 'error');
+  }
+}
+
+// ─────────────────────────────────────────────
+// Fetch all data from Ubidots
+// ─────────────────────────────────────────────
+async function fetchAllData() {
+  const fechaInicio = document.getElementById('cfgFechaInicio').value;
+  const fechaFin = document.getElementById('cfgFechaFin').value;
+  if (!fechaInicio || !fechaFin) throw new Error('Configura las fechas en la pestaña Configuración');
+
+  const tz = parseInt(document.getElementById('cfgTz').value) || -5;
+  const startMs = new Date(fechaInicio + 'T00:00:00').getTime() - tz * 3600000;
+  const endMs = new Date(fechaFin + 'T23:59:59').getTime() - tz * 3600000;
+
+  // Collect all unique (device_label, var_label) pairs from components
+  const seriesMap = {}; // data_key -> {device_label, var_label}
+
+  for (const comp of state.components) {
+    const collect = (list) => (list || []).forEach(s => {
+      if (s.data_key && s.var_label) seriesMap[s.data_key] = s;
+    });
+    if (comp.series) collect(comp.series);
+    if (comp.cards) collect(comp.cards);
+    if (comp.periods) Object.values(comp.periods).forEach(collect);
+  }
+
+  const allData = {};
+
+  // Batch by fetching each series individually (or could batch by device)
+  const keys = Object.keys(seriesMap);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const s = seriesMap[key];
+    showLoading(`Obteniendo datos (${i + 1}/${keys.length}): ${s.label || key}...`);
+
+    // Find variable id
+    let varId = s.id;
+    if (!varId) {
+      // Try to look it up from loaded variables
+      const deviceVars = state.variables[s.device_label] || [];
+      const found = deviceVars.find(v => v.label === s.var_label);
+      varId = found?.id;
+    }
+
+    if (!varId) {
+      // Fallback: use label-based approach (some Ubidots APIs accept labels)
+      console.warn(`No ID found for ${key}, skipping`);
+      allData[key] = [];
+      continue;
+    }
+
+    try {
+      // Fetch hourly data
+      const resp = await fetch('/api/fetch_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: state.token,
+          device_label: s.device_label,
+          var_label: s.var_label,
+          start_ms: startMs,
+          end_ms: endMs,
+        }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      const data = await resp.json();
+
+      // Parse Ubidots v1.6 values response: {results: [{timestamp, value}]}
+      const points = [];
+      (data.results || []).forEach(pt => {
+        if (pt.timestamp != null) {
+          const dt = new Date(pt.timestamp);
+          const tzDt = new Date(dt.getTime() + tz * 3600000);
+          points.push({
+            timestamp: tzDt.toISOString().slice(0, 19),
+            value: pt.value || 0,
+          });
+        }
+      });
+      allData[key] = points;
+    } catch(e) {
+      console.error(`Error fetching ${key}:`, e);
+      allData[key] = [];
+    }
+  }
+
+  return { allData, startMs, endMs };
+}
+
+// ─────────────────────────────────────────────
+// Generate report
+// ─────────────────────────────────────────────
+async function generateReport() {
+  if (!state.components.length) { showToast('Agrega al menos un componente', 'error'); return; }
+
+  showLoading('Preparando datos...');
+  try {
+    // Collect config
+    const config = {
+      titulo: document.getElementById('cfgTitulo').value || 'Informe Operativo',
+      subtitulo: document.getElementById('cfgSubtitulo').value || '',
+      autor: document.getElementById('cfgAutor').value || '',
+      fecha_inicio: document.getElementById('cfgFechaInicio').value,
+      fecha_fin: document.getElementById('cfgFechaFin').value,
+      tz_offset: parseInt(document.getElementById('cfgTz').value) || -5,
+      total_maiz: parseFloat(document.getElementById('cfgMaiz').value) || 0,
+      dosis_objetivo: parseFloat(document.getElementById('cfgDosis').value) || 0.6,
+    };
+
+    if (!config.fecha_inicio || !config.fecha_fin) {
+      hideLoading();
+      showToast('Configura las fechas de inicio y fin', 'error');
+      switchTab('config');
+      return;
+    }
+
+    // Check if we need to fetch data from Ubidots
+    let allData = {};
+    const hasVars = state.components.some(c => {
+      const lists = [c.series, c.cards, ...Object.values(c.periods || {})];
+      return lists.some(l => (l || []).some(s => s.data_key));
+    });
+
+    if (hasVars && state.token) {
+      const result = await fetchAllData();
+      allData = result.allData;
+    }
+
+    // Add historical rows from config panel
+    const histComp = state.components.find(c => c.type === 'historical');
+    if (histComp) {
+      // Add dosis computed field
+      histComp.rows = state.histRows.map(r => ({
+        ...r,
+        dosis: r.maiz > 0 ? r.inhimold / r.maiz : 0,
+      }));
+    }
+
+    showLoading('Generando HTML del informe...');
+    const resp = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: state.token, config, components: state.components, all_data: allData }),
+    });
+    if (!resp.ok) throw new Error(await resp.text());
+    const result = await resp.json();
+
+    // Download the HTML file
+    const blob = new Blob([result.html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const fecha = config.fecha_inicio || 'informe';
+    a.href = url;
+    a.download = `Informe_${(config.subtitulo || config.titulo).replace(/\s+/g, '_')}_${fecha}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('¡Informe generado exitosamente!', 'success');
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+    console.error(e);
+  } finally {
+    hideLoading();
+  }
+}
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+window.onload = () => {
+  renderHistRows();
+  // Restore token from sessionStorage if available
+  const savedToken = sessionStorage.getItem('sento_token');
+  if (savedToken) {
+    document.getElementById('tokenInput').value = savedToken;
+  }
+  document.getElementById('tokenInput').addEventListener('input', e => {
+    sessionStorage.setItem('sento_token', e.target.value);
+  });
+};
+</script>
+</body>
+</html>
