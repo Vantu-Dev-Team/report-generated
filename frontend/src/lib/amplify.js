@@ -11,8 +11,16 @@ Amplify.configure({
         oauth: {
           domain: import.meta.env.VITE_COGNITO_DOMAIN,
           scopes: ['openid', 'email', 'profile'],
-          redirectSignIn: [`${window.location.origin}/`],
-          redirectSignOut: [`${window.location.origin}/login`],
+          redirectSignIn: [
+            'http://localhost:5173/',
+            'https://reports.sentoapp.net/',
+            'https://master.d1l9zrx2p5onp7.amplifyapp.com/',
+          ],
+          redirectSignOut: [
+            'http://localhost:5173/login',
+            'https://reports.sentoapp.net/login',
+            'https://master.d1l9zrx2p5onp7.amplifyapp.com/login',
+          ],
           responseType: 'code',
           providers: [{ custom: 'Google' }],
         },
