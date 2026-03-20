@@ -1,9 +1,10 @@
 import React, { useContext, useState } from 'react'
-import { FolderOpen, Save, Trash2, FileDown, Loader2, LayoutDashboard, Settings } from 'lucide-react'
+import { FolderOpen, Save, Trash2, FileDown, Loader2, LayoutDashboard, Settings, Eye } from 'lucide-react'
 import useReportStore from '../store/reportStore.js'
 import { fetchValues, generateReport } from '../api/client.js'
 import { ToastContext } from '../App.jsx'
 import ConfigsModal from './ConfigsModal.jsx'
+import PreviewModal from './PreviewModal.jsx'
 
 function collectDataKeys(components) {
   const keys = new Set()
@@ -37,6 +38,7 @@ export default function Topbar({ activeTab, setActiveTab }) {
 
   const [progress, setProgress] = useState('')
   const [configsModal, setConfigsModal] = useState(null)
+  const [preview, setPreview] = useState(null) // { html, fileName }
 
   const handleGenerate = async () => {
     if (!config.fecha_inicio || !config.fecha_fin) {
@@ -71,17 +73,11 @@ export default function Topbar({ activeTab, setActiveTab }) {
       )
       const res = await generateReport(config, compsWithHist, allData)
       const html = res.data.html
-
-      const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
       const fileName = `informe_${config.titulo || 'sento'}_${config.fecha_inicio || 'fecha'}.html`
         .replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_.-]/g, '')
-      a.href = url
-      a.download = fileName
-      a.click()
-      URL.revokeObjectURL(url)
-      addToast('Informe generado y descargado correctamente', 'success')
+
+      setPreview({ html, fileName })
+      addToast('Informe listo — revisa la vista previa', 'success')
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || 'Error desconocido'
       addToast(`Error al generar: ${msg}`, 'error')
@@ -161,6 +157,18 @@ export default function Topbar({ activeTab, setActiveTab }) {
           <span className="hidden sm:block">Limpiar</span>
         </button>
 
+        {preview && (
+          <button
+            onClick={() => setPreview(prev => ({ ...prev }))}
+            disabled={generating}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold text-slate-500 hover:text-slate-700 hover:bg-slate-100 transition-colors disabled:opacity-40"
+            title="Ver último informe generado"
+          >
+            <Eye size={15} />
+            <span className="hidden sm:block">Vista Previa</span>
+          </button>
+        )}
+
         <button
           onClick={handleGenerate}
           disabled={!hasComponents || generating}
@@ -175,6 +183,14 @@ export default function Topbar({ activeTab, setActiveTab }) {
 
       {configsModal && (
         <ConfigsModal mode={configsModal} onClose={() => setConfigsModal(null)} />
+      )}
+
+      {preview && (
+        <PreviewModal
+          html={preview.html}
+          fileName={preview.fileName}
+          onClose={() => setPreview(null)}
+        />
       )}
     </header>
   )
